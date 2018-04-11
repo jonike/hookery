@@ -105,18 +105,7 @@ class NoSubject:
     __repr__ = __str__
 
 
-class Hook:
-    """
-    A hook is something that a user can hook into.
-
-    It may have a name, a subject. To hook into it, user registers handlers with it.
-
-    When a thing has hooks, it means one can interact with this thing via hooks.
-    This thing that the hook is providing a way to interact with, is here called the hook's subject.
-
-    Hook's handlers are functions registered to be called when the hook is triggered (called)
-    most often by hook's subject itself.
-    """
+class HookBase:
     def __init__(
         self, name=None, subject=None,
         parent_class_hook=None, instance_class_hook=None, single_handler=False,
@@ -127,10 +116,10 @@ class Hook:
         self.subject = subject if subject is not None else NoSubject()
 
         # Hook associated with the parent class of the class which is this hook's subject
-        self.parent_class_hook = parent_class_hook  # type: Hook
+        self.parent_class_hook = parent_class_hook  # type: HookBase
 
         # Hook associated with the class of the instance which is this hook's subject
-        self.instance_class_hook = instance_class_hook  # type: Hook
+        self.instance_class_hook = instance_class_hook  # type: HookBase
 
         # Class in which the hook was defined.
         self.defining_class = defining_class  # type: type
@@ -145,8 +134,15 @@ class Hook:
 
         self._is_triggering = False
 
-    def __call__(self, func) -> callable:
-        return self.register_handler(func)
+    @property
+    def meta(self):
+        """
+        A dictionary of meta information describing the nature of this hook,
+        to be passed as kwargs to Hook initialiser when creating a hook based on an existing hook.
+        """
+        return {
+            'single_handler': self.single_handler,
+        }
 
     @contextlib.contextmanager
     def _triggering_ctx(self):
@@ -160,6 +156,9 @@ class Hook:
         self._is_triggering = False
 
     def trigger(_self_, **kwargs):
+        """
+        Trigger the hook -- call all its handlers.
+        """
         if _self_.args:
             for k in kwargs.keys():
                 if not k.startswith('_') and k not in _self_.args:
@@ -176,16 +175,6 @@ class Hook:
             result = handler(**kwargs)
             results.append(result)
         return results
-
-    @property
-    def meta(self):
-        """
-        A dictionary of meta information describing the nature of this hook,
-        to be passed as kwargs to Hook initialiser when creating a hook based on an existing hook.
-        """
-        return {
-            'single_handler': self.single_handler,
-        }
 
     def get_all_handlers(self) -> Generator[Handler, None, None]:
         def get_raw_handlers():
@@ -215,6 +204,9 @@ class Hook:
         self._direct_handlers.append(handler)
         self._cached_handlers = None
         return handler
+
+    def __call__(self, func) -> callable:
+        return self.register_handler(func)
 
     def has_handler(self, handler_or_func) -> bool:
         for handler in self._direct_handlers:
@@ -272,6 +264,40 @@ class Hook:
             return '<{} {}.{}>'.format(self.__class__.__name__, self.subject.__class__.__name__, self.name)
 
     __str__ = __repr__
+
+
+class InternalHook(HookBase):
+    pass
+
+
+class Hook(HookBase):
+    """
+    A hook is something that a user can hook into.
+
+    It may have a name, a subject. To hook into it, user registers handlers with it.
+
+    When a thing has hooks, it means one can interact with this thing via hooks.
+    This thing that the hook is providing a way to interact with, is here called the hook's subject.
+
+    Hook's handlers are functions registered to be called when the hook is triggered (called)
+    most often by hook's subject itself.
+    """
+
+    # TODO Problem is this isn't initialised properly!
+
+    # TODO Perhaps should use some global registry for internal hooks...
+    # TODO and then do trigger_handler_registered(bound_hook=bound_hook, bound_handler=bound_handler)
+    # TODO in which we go through all registered handlers and only call the ones matching bound_hook
+
+    handler_registered = InternalHook(args=('hook', 'handler'))
+
+    def register_handler(self, handler_func):
+        handler = super().register_handler(handler_func)
+        for hr_handler in self.handler_registered.handlers:
+            print(self, hr_handler.hook)
+            hr_handler(hook=self, handler=handler)
+        # self.handler_registered.trigger(hook=self, handler=handler)
+        return handler
 
 
 class HookDescriptor:
